@@ -80,7 +80,7 @@ export default function RestaurantChatbot() {
         URL.revokeObjectURL(audioRef.current.src);
         audioRef.current = null;
       }
-      const res = await fetch('import.meta.env.VITE_API_URL/api/tts', {
+      const res = await fetch(`${import.meta.env.VITE_API_URL}/api/tts`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text }),
@@ -130,7 +130,7 @@ export default function RestaurantChatbot() {
     setInput('');
     setLoading(true);
     try {
-      const res = await fetch('import.meta.env.VITE_API_URL/api/chat', {
+      const res = await fetch(`${import.meta.env.VITE_API_URL}/api/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
