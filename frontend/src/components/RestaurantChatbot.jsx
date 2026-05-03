@@ -1,142 +1,93 @@
 import { useState, useRef, useEffect } from 'react';
 import { restaurants } from '../menuData';
 
-const CATEGORY_EMOJI = {
-  'New Items': '⭐',
-  'Classic Burgers': '🍔',
-  'Special Burgers': '🔥',
-  'Diet Burgers': '🥗',
-  Starters: '🍗',
-  Salads: '🥙',
-  Fries: '🍟',
-  Desserts: '🍰',
-  Drinks: '🥤',
+const CATEGORY_STYLE = {
+  Starters: { gradient: 'linear-gradient(135deg, #0d2418 0%, #061310 100%)', emoji: '🥗',  accent: '#34d399' },
+  Mains:    { gradient: 'linear-gradient(135deg, #0d1828 0%, #060f18 100%)', emoji: '🍽️', accent: '#60a5fa' },
+  Burgers:  { gradient: 'linear-gradient(135deg, #281808 0%, #180f05 100%)', emoji: '🍔',  accent: '#fb923c' },
+  Pizza:    { gradient: 'linear-gradient(135deg, #280d0d 0%, #180606 100%)', emoji: '🍕',  accent: '#f87171' },
+  Desserts: { gradient: 'linear-gradient(135deg, #28081a 0%, #180610 100%)', emoji: '🍰',  accent: '#f472b6' },
+  Drinks:   { gradient: 'linear-gradient(135deg, #081828 0%, #060d18 100%)', emoji: '🥤',  accent: '#38bdf8' },
 };
 
-const CATEGORY_BG = {
-  'New Items': '#1e1a00',
-  'Classic Burgers': '#1e0e00',
-  'Special Burgers': '#1e0800',
-  'Diet Burgers': '#0e1e0e',
-  Starters: '#1a1000',
-  Salads: '#0e1a0e',
-  Fries: '#1e1200',
-  Desserts: '#1e0a14',
-  Drinks: '#0a0e1e',
-};
+const ACCENT = '#f59e0b';
 
 function buildSystemPrompt(restaurant) {
-  if (!restaurant) return '';
   const menuText = restaurant.menu
-    .map(
-      (cat) =>
-        `${cat.category}:\n${cat.items
-          .map((item) => `  - ${item.name} ($${item.price}): ${item.description}`)
-          .join('\n')}`
-    )
+    .map(cat => `${cat.category}:\n${cat.items.map(i => `  - ${i.name} ($${i.price}): ${i.description}`).join('\n')}`)
     .join('\n\n');
-  return `You are an AI waiter at ${restaurant.name}. Your ONLY job is to help customers with questions related to the menu — such as recommendations, ingredients, calories, prices, dietary options, or comparisons between items.
+  return `You are a friendly AI waiter at ${restaurant.name}. Your ONLY job is to help guests with the menu — recommendations, ingredients, dietary needs, prices, or comparisons.
 
-STRICT RULES:
-- ONLY answer questions about the menu, food items, drinks, or dining at ${restaurant.name}.
-- If the user asks ANYTHING unrelated to the menu (e.g. general knowledge, coding, news, math, personal advice, or any other topic), politely decline and redirect them to the menu. Say something like: "I'm only here to help you with our menu! Can I recommend something for you?"
-- ALWAYS reply in the same language the user writes in. If they write in Arabic, reply fully in Arabic. If they write in English, reply in English. Never mix languages in a single reply.
-- Be warm, concise, and helpful — but stay strictly on topic.
+RULES:
+- ONLY answer questions about the menu or dining experience.
+- If asked anything unrelated, politely decline and redirect to the menu.
+- ALWAYS reply in the same language the user writes in.
+- Be warm, concise, and specific.
 
-Here is the full menu:\n\n${menuText}`;
+MENU:\n\n${menuText}`;
 }
 
 export default function RestaurantChatbot() {
-  const [activeCategory, setActiveCategory] = useState(restaurants[0].menu[0].category);
-  const [chatOpen, setChatOpen] = useState(false);
-  const [messages, setMessages] = useState([]);
-  const [input, setInput] = useState('');
-  const [loading, setLoading] = useState(false);
+  const restaurant = restaurants[0];
+  const [activeCategory, setActiveCategory] = useState(restaurant.menu[0].category);
+  const [chatOpen, setChatOpen]   = useState(false);
+  const [messages, setMessages]   = useState([]);
+  const [input, setInput]         = useState('');
+  const [loading, setLoading]     = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [autoSpeak, setAutoSpeak] = useState(false);
-  const [voiceLang, setVoiceLang] = useState('en-US'); // 'en-US' or 'ar-SA'
+  const [voiceLang, setVoiceLang] = useState('en-US');
   const messagesEndRef = useRef(null);
-  const inputRef = useRef(null);
+  const inputRef       = useRef(null);
   const recognitionRef = useRef(null);
-  const audioRef = useRef(null);
+  const audioRef       = useRef(null);
 
-  const currentRestaurant = restaurants[0];
-  const currentCategory = currentRestaurant.menu.find((c) => c.category === activeCategory);
+  const currentCategory = restaurant.menu.find(c => c.category === activeCategory);
+  const catStyle = CATEGORY_STYLE[activeCategory] || { gradient: 'linear-gradient(135deg,#1a1a1a,#0a0a0a)', emoji: '🍽️', accent: ACCENT };
 
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, loading]);
+  useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, loading]);
+  useEffect(() => { if (chatOpen) inputRef.current?.focus(); }, [chatOpen]);
 
-  useEffect(() => {
-    if (chatOpen) inputRef.current?.focus();
-  }, [chatOpen]);
-
-  // ── Text-to-Speech (ElevenLabs via backend) ──
+  // ── ElevenLabs TTS ──
   const speak = async (text) => {
     try {
-      // Stop any currently playing audio
-      if (audioRef.current) {
-        audioRef.current.pause();
-        URL.revokeObjectURL(audioRef.current.src);
-        audioRef.current = null;
-      }
+      if (audioRef.current) { audioRef.current.pause(); URL.revokeObjectURL(audioRef.current.src); audioRef.current = null; }
       const res = await fetch(`${import.meta.env.VITE_API_URL}/api/tts`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text }),
       });
       if (!res.ok) return;
       const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      audioRef.current = new Audio(url);
+      audioRef.current = new Audio(URL.createObjectURL(blob));
       audioRef.current.play();
-    } catch (err) {
-      console.error('TTS error:', err);
-    }
+    } catch (err) { console.error('TTS error:', err); }
   };
 
-  // ── Speech-to-Text ──
+  // ── Speech Recognition ──
   const toggleListening = () => {
-    if (isListening) {
-      recognitionRef.current?.stop();
-      return;
-    }
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      alert('Voice input is not supported in this browser. Please use Chrome or Edge.');
-      return;
-    }
-    const recognition = new SpeechRecognition();
-    recognition.lang = voiceLang;
-    recognition.interimResults = false;
-    recognition.maxAlternatives = 1;
-    recognition.onstart = () => setIsListening(true);
-    recognition.onend = () => setIsListening(false);
-    recognition.onresult = (e) => {
-      const transcript = e.results[0][0].transcript;
-      setInput(transcript);
-      inputRef.current?.focus();
-    };
-    recognition.onerror = () => setIsListening(false);
-    recognitionRef.current = recognition;
-    recognition.start();
+    if (isListening) { recognitionRef.current?.stop(); return; }
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) { alert('Voice input requires Chrome or Edge.'); return; }
+    const r = new SR();
+    r.lang = voiceLang; r.interimResults = false; r.maxAlternatives = 1;
+    r.onstart  = () => setIsListening(true);
+    r.onend    = () => setIsListening(false);
+    r.onerror  = () => setIsListening(false);
+    r.onresult = (e) => { setInput(e.results[0][0].transcript); inputRef.current?.focus(); };
+    recognitionRef.current = r;
+    r.start();
   };
 
+  // ── Send message ──
   const sendMessage = async () => {
     if (!input.trim() || loading) return;
-    const userMessage = { role: 'user', content: input.trim() };
-    const history = [...messages, userMessage];
-    setMessages(history);
-    setInput('');
-    setLoading(true);
+    const userMsg = { role: 'user', content: input.trim() };
+    const history = [...messages, userMsg];
+    setMessages(history); setInput(''); setLoading(true);
     try {
-      const res = await fetch(`${import.meta.env.VITE_API_URL}/api/chat`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          messages: history,
-          systemPrompt: buildSystemPrompt(currentRestaurant),
-        }),
+      const res  = await fetch(`${import.meta.env.VITE_API_URL}/api/chat`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messages: history, systemPrompt: buildSystemPrompt(restaurant) }),
       });
       const data = await res.json();
       const reply = data.error ? `Error: ${data.error}` : data.reply;
@@ -144,178 +95,178 @@ export default function RestaurantChatbot() {
       if (autoSpeak && !data.error) speak(reply);
     } catch {
       setMessages([...history, { role: 'assistant', content: 'Could not reach the server. Please make sure the backend is running.' }]);
-    } finally {
-      setLoading(false);
-    }
+    } finally { setLoading(false); }
   };
 
-  const handleKeyDown = (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      sendMessage();
-    }
-  };
+  const handleKeyDown = (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } };
+
+  // ── Shared button style helper ──
+  const iconBtn = (active, color = ACCENT) => ({
+    padding: '6px 12px', borderRadius: '8px', border: 'none', cursor: 'pointer', fontSize: '13px',
+    fontWeight: '600', transition: 'all 0.2s',
+    background: active ? color : '#1e1e1e',
+    color: active ? '#000' : '#666',
+  });
 
   return (
-    <div style={{ minHeight: '100vh', background: '#0a0a0a', color: 'white', fontFamily: 'system-ui, sans-serif' }}>
+    <div style={{ minHeight: '100vh', background: '#0a0a0a', color: '#f0f0f0', fontFamily: "'Inter', system-ui, sans-serif" }}>
 
-      {/* ── Header ── */}
+      {/* ── HEADER ── */}
       <header style={{
         position: 'sticky', top: 0, zIndex: 100,
-        background: 'rgba(10,10,10,0.95)', backdropFilter: 'blur(12px)',
-        borderBottom: '1px solid #1f1f1f',
-        padding: '0 40px',
+        background: 'rgba(10,10,10,0.85)', backdropFilter: 'blur(20px)',
+        borderBottom: '1px solid #1a1a1a',
+        padding: '0 40px', height: '60px',
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        height: '64px',
       }}>
-        <div style={{ fontSize: '20px', fontWeight: '800', letterSpacing: '-0.5px', color: '#e8a045' }}>
-          CENTURY BURGER
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <div style={{
+            width: '32px', height: '32px', borderRadius: '8px', background: ACCENT,
+            display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '16px',
+          }}>🤖</div>
+          <span style={{ fontWeight: '800', fontSize: '16px', letterSpacing: '-0.3px' }}>
+            Bot<span style={{ color: ACCENT }}>Waiter</span>
+          </span>
         </div>
-        <div style={{ fontSize: '13px', color: '#555' }}>Est. 2011 · Saudi Arabia</div>
+        <div style={{ fontSize: '12px', color: '#444', fontWeight: '500', letterSpacing: '0.05em', textTransform: 'uppercase' }}>
+          {restaurant.tagline}
+        </div>
       </header>
 
-      {/* ── Hero ── */}
+      {/* ── HERO ── */}
       <div style={{
-        background: 'linear-gradient(160deg, #1a0e00 0%, #0a0a0a 60%)',
-        padding: '64px 40px 48px',
-        borderBottom: '1px solid #1f1f1f',
+        position: 'relative', overflow: 'hidden',
+        padding: '72px 40px 56px',
+        background: 'radial-gradient(ellipse 80% 60% at 10% 50%, rgba(245,158,11,0.1) 0%, transparent 60%), #0a0a0a',
+        borderBottom: '1px solid #141414',
       }}>
-        <p style={{ margin: '0 0 8px', fontSize: '13px', color: '#e8a045', fontWeight: '600', letterSpacing: '0.12em', textTransform: 'uppercase' }}>
-          Welcome to / أهلاً بك في
+        <p style={{ margin: '0 0 10px', fontSize: '12px', fontWeight: '700', color: ACCENT, letterSpacing: '0.15em', textTransform: 'uppercase' }}>
+          Welcome to
         </p>
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: '20px', flexWrap: 'wrap', marginBottom: '12px' }}>
-          <h1 style={{ margin: 0, fontSize: '52px', fontWeight: '800', letterSpacing: '-1.5px', lineHeight: 1.1 }}>
-            {currentRestaurant.name}
-          </h1>
-          <h1 style={{ margin: 0, fontSize: '40px', fontWeight: '800', lineHeight: 1.1, color: '#e8a045', direction: 'rtl' }}>
-            {currentRestaurant.nameAr}
-          </h1>
-        </div>
-        <p style={{ margin: 0, color: '#666', fontSize: '15px' }}>
-          Browse our menu below — or ask our AI waiter for a recommendation.
-          <span style={{ display: 'block', direction: 'rtl', marginTop: '4px' }}>تصفح قائمتنا أدناه — أو اسأل نادلنا الذكي للحصول على توصية.</span>
+        <h1 style={{ margin: '0 0 14px', fontSize: '56px', fontWeight: '800', letterSpacing: '-2px', lineHeight: 1.05 }}>
+          {restaurant.name}
+        </h1>
+        <p style={{ margin: 0, fontSize: '15px', color: '#555', maxWidth: '480px', lineHeight: 1.6 }}>
+          Browse our menu and tap the chat icon to get personalized recommendations from your AI waiter.
         </p>
       </div>
 
-      {/* ── Category tabs ── */}
+      {/* ── CATEGORY TABS ── */}
       <div style={{
-        padding: '20px 40px 0',
-        display: 'flex', gap: '10px', overflowX: 'auto',
-        borderBottom: '1px solid #1f1f1f',
+        padding: '0 40px',
+        borderBottom: '1px solid #141414',
+        display: 'flex', gap: '0', overflowX: 'auto',
+        scrollbarWidth: 'none',
       }}>
-        {currentRestaurant.menu.map((cat) => (
-          <button key={cat.category} onClick={() => setActiveCategory(cat.category)} style={{
-            padding: '10px 20px', borderRadius: '0', border: 'none', cursor: 'pointer',
-            background: 'transparent',
-            color: activeCategory === cat.category ? '#e8a045' : '#555',
-            fontWeight: '600', fontSize: '14px', whiteSpace: 'nowrap',
-            borderBottom: activeCategory === cat.category ? '2px solid #e8a045' : '2px solid transparent',
-            transition: 'all 0.2s', marginBottom: '-1px',
-            display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px',
-          }}>
-            <span>{CATEGORY_EMOJI[cat.category] || '🍽️'} {cat.category}</span>
-            <span style={{ fontSize: '11px', fontWeight: '500', direction: 'rtl' }}>{cat.categoryAr}</span>
-          </button>
-        ))}
-      </div>
-
-      {/* ── Menu grid ── */}
-      <div style={{ padding: '32px 40px 120px', display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '20px' }}>
-        {currentCategory?.items.map((item) => (
-          <div key={item.name} style={{
-            background: '#141414', borderRadius: '14px', overflow: 'hidden',
-            border: '1px solid #1f1f1f', transition: 'border-color 0.2s, transform 0.2s',
-          }}
-            onMouseEnter={e => { e.currentTarget.style.borderColor = '#e8a045'; e.currentTarget.style.transform = 'translateY(-2px)'; }}
-            onMouseLeave={e => { e.currentTarget.style.borderColor = '#1f1f1f'; e.currentTarget.style.transform = 'translateY(0)'; }}
-          >
-            {/* Image placeholder */}
-            <div style={{
-              height: '170px',
-              background: CATEGORY_BG[activeCategory] || '#1a1a1a',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: '56px',
+        {restaurant.menu.map(cat => {
+          const s = CATEGORY_STYLE[cat.category] || {};
+          const isActive = activeCategory === cat.category;
+          return (
+            <button key={cat.category} onClick={() => setActiveCategory(cat.category)} style={{
+              padding: '16px 20px', border: 'none', cursor: 'pointer', background: 'transparent',
+              color: isActive ? s.accent || ACCENT : '#444',
+              fontWeight: isActive ? '700' : '500', fontSize: '14px', whiteSpace: 'nowrap',
+              borderBottom: isActive ? `2px solid ${s.accent || ACCENT}` : '2px solid transparent',
+              transition: 'all 0.2s', marginBottom: '-1px',
+              display: 'flex', alignItems: 'center', gap: '6px',
             }}>
-              {CATEGORY_EMOJI[activeCategory] || '🍽️'}
-            </div>
-            <div style={{ padding: '16px' }}>
-              {/* Name row: EN left, price center-right, AR right */}
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '8px', marginBottom: '6px' }}>
-                <span style={{ fontWeight: '700', fontSize: '14px', color: '#f0f0f0', lineHeight: 1.3 }}>{item.name}</span>
-                <span style={{ color: '#e8a045', fontWeight: '700', fontSize: '14px', whiteSpace: 'nowrap' }}>{item.price}</span>
-              </div>
-              <div style={{ textAlign: 'right', fontSize: '13px', fontWeight: '600', color: '#bbb', direction: 'rtl', marginBottom: '10px' }}>
-                {item.nameAr}
-              </div>
-              {/* Divider */}
-              <div style={{ borderTop: '1px solid #222', marginBottom: '10px' }} />
-              {/* English description */}
-              <p style={{ margin: '0 0 6px', fontSize: '12px', color: '#666', lineHeight: '1.5' }}>{item.description}</p>
-              {/* Arabic description */}
-              <p style={{ margin: 0, fontSize: '12px', color: '#555', lineHeight: '1.5', textAlign: 'right', direction: 'rtl' }}>{item.descriptionAr}</p>
-            </div>
-          </div>
-        ))}
+              <span>{CATEGORY_STYLE[cat.category]?.emoji || '🍽️'}</span>
+              <span>{cat.category}</span>
+            </button>
+          );
+        })}
       </div>
 
-      {/* ── Floating chat button ── */}
-      <button onClick={() => setChatOpen((o) => !o)} style={{
-        position: 'fixed', bottom: '24px', left: '24px',
-        width: '56px', height: '56px', borderRadius: '50%',
-        background: chatOpen ? '#333' : '#e8a045',
-        border: 'none', cursor: 'pointer',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        fontSize: '22px',
-        boxShadow: chatOpen ? '0 4px 16px rgba(0,0,0,0.4)' : '0 4px 24px rgba(232,160,69,0.5)',
-        zIndex: 200, transition: 'all 0.25s',
+      {/* ── MENU GRID ── */}
+      <div style={{ padding: '32px 40px 140px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: '16px' }}>
+          {currentCategory?.items.map(item => (
+            <div key={item.name}
+              style={{ background: '#111', borderRadius: '16px', overflow: 'hidden', border: '1px solid #1a1a1a', transition: 'all 0.25s', cursor: 'default' }}
+              onMouseEnter={e => { e.currentTarget.style.border = `1px solid ${catStyle.accent}40`; e.currentTarget.style.transform = 'translateY(-3px)'; e.currentTarget.style.boxShadow = `0 12px 40px ${catStyle.accent}15`; }}
+              onMouseLeave={e => { e.currentTarget.style.border = '1px solid #1a1a1a'; e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = 'none'; }}
+            >
+              {/* Visual area */}
+              <div style={{
+                height: '140px', background: catStyle.gradient,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: '48px', position: 'relative',
+              }}>
+                <span style={{ filter: 'drop-shadow(0 4px 12px rgba(0,0,0,0.5))' }}>{catStyle.emoji}</span>
+                <div style={{
+                  position: 'absolute', top: '12px', right: '12px',
+                  background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(8px)',
+                  padding: '4px 10px', borderRadius: '20px',
+                  fontSize: '13px', fontWeight: '700', color: catStyle.accent,
+                }}>
+                  ${item.price}
+                </div>
+              </div>
+              {/* Content */}
+              <div style={{ padding: '16px' }}>
+                <div style={{ fontWeight: '700', fontSize: '15px', color: '#f0f0f0', marginBottom: '6px' }}>
+                  {item.name}
+                </div>
+                <div style={{ fontSize: '13px', color: '#555', lineHeight: '1.55' }}>
+                  {item.description}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* ── FLOATING CHAT BUTTON ── */}
+      <button onClick={() => setChatOpen(o => !o)} style={{
+        position: 'fixed', bottom: '28px', left: '28px',
+        width: '54px', height: '54px', borderRadius: '50%',
+        background: chatOpen ? '#1e1e1e' : ACCENT,
+        border: `1px solid ${chatOpen ? '#333' : ACCENT}`,
+        cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+        fontSize: '20px',
+        boxShadow: chatOpen ? 'none' : `0 8px 32px rgba(245,158,11,0.4)`,
+        zIndex: 300, transition: 'all 0.3s cubic-bezier(0.34,1.56,0.64,1)',
       }}>
         {chatOpen ? '✕' : '💬'}
       </button>
 
-      {/* ── Chat widget ── */}
+      {/* ── CHAT WIDGET ── */}
       <div style={{
-        position: 'fixed', bottom: '92px', left: '24px',
-        width: '360px', height: '500px',
-        background: '#141414', borderRadius: '20px',
-        border: '1px solid #2a2a2a',
+        position: 'fixed', bottom: '96px', left: '28px',
+        width: '370px', height: '520px',
+        background: '#111', borderRadius: '24px',
+        border: '1px solid #1e1e1e',
         display: 'flex', flexDirection: 'column',
-        zIndex: 200,
-        boxShadow: '0 16px 48px rgba(0,0,0,0.6)',
+        zIndex: 300, boxShadow: '0 24px 64px rgba(0,0,0,0.7)',
         transformOrigin: 'bottom left',
-        transform: chatOpen ? 'scale(1)' : 'scale(0.85)',
+        transform: chatOpen ? 'scale(1) translateY(0)' : 'scale(0.9) translateY(10px)',
         opacity: chatOpen ? 1 : 0,
         pointerEvents: chatOpen ? 'all' : 'none',
-        transition: 'transform 0.25s cubic-bezier(0.34,1.56,0.64,1), opacity 0.2s',
+        transition: 'transform 0.3s cubic-bezier(0.34,1.56,0.64,1), opacity 0.2s ease',
       }}>
+
         {/* Widget header */}
         <div style={{
-          padding: '14px 18px', borderBottom: '1px solid #222',
+          padding: '16px 18px', borderBottom: '1px solid #1a1a1a',
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          borderRadius: '20px 20px 0 0', background: '#1a1a1a',
+          borderRadius: '24px 24px 0 0',
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
             <div style={{
-              width: '36px', height: '36px', borderRadius: '50%',
-              background: '#e8a045', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '16px',
+              width: '38px', height: '38px', borderRadius: '12px',
+              background: `linear-gradient(135deg, ${ACCENT}, #d97706)`,
+              display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '18px',
             }}>🤖</div>
             <div>
-              <div style={{ fontWeight: '700', fontSize: '14px', color: '#f0f0f0' }}>AI Waiter · النادل الذكي</div>
-              <div style={{ fontSize: '11px', color: '#4CAF50', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#4CAF50', display: 'inline-block' }} />
-                {currentRestaurant.name}
+              <div style={{ fontWeight: '700', fontSize: '14px', color: '#f0f0f0' }}>AI Waiter</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '11px', color: '#34d399' }}>
+                <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#34d399', display: 'inline-block' }} />
+                {restaurant.name}
               </div>
             </div>
           </div>
           {/* Auto-speak toggle */}
-          <button
-            onClick={() => setAutoSpeak((s) => !s)}
-            title={autoSpeak ? 'Mute AI responses' : 'Read AI responses aloud'}
-            style={{
-              background: autoSpeak ? '#e8a045' : '#2a2a2a', border: 'none',
-              borderRadius: '8px', padding: '6px 10px', cursor: 'pointer',
-              fontSize: '16px', transition: 'background 0.2s',
-            }}
-          >
+          <button onClick={() => setAutoSpeak(s => !s)} title="Toggle voice responses" style={iconBtn(autoSpeak, ACCENT)}>
             {autoSpeak ? '🔊' : '🔇'}
           </button>
         </div>
@@ -323,102 +274,94 @@ export default function RestaurantChatbot() {
         {/* Messages */}
         <div style={{ flex: 1, overflowY: 'auto', padding: '16px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
           {messages.length === 0 && (
-            <div style={{
-              margin: 'auto', textAlign: 'center', color: '#555', fontSize: '13px', padding: '20px',
-            }}>
-              <div style={{ fontSize: '32px', marginBottom: '10px' }}>👋</div>
-              Hi! I'm your AI waiter at {currentRestaurant.name}.<br />Ask me for a recommendation!
-              <br /><br />
-              <span style={{ direction: 'rtl', display: 'block' }}>أهلاً! أنا نادلك الذكي في {currentRestaurant.nameAr}.<br />اسألني عن توصية!</span>
+            <div style={{ margin: 'auto', textAlign: 'center', padding: '24px 16px' }}>
+              <div style={{ fontSize: '36px', marginBottom: '12px' }}>👋</div>
+              <div style={{ fontWeight: '700', fontSize: '15px', color: '#f0f0f0', marginBottom: '6px' }}>
+                Hi, I'm your AI Waiter!
+              </div>
+              <div style={{ fontSize: '13px', color: '#555', lineHeight: 1.6 }}>
+                Ask me anything about the menu — I'll help you find the perfect dish.
+              </div>
             </div>
           )}
           {messages.map((msg, i) => (
             <div key={i} style={{
               alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start',
-              maxWidth: '82%',
-              padding: '10px 14px',
-              borderRadius: msg.role === 'user' ? '16px 16px 4px 16px' : '16px 16px 16px 4px',
-              background: msg.role === 'user' ? '#e8a045' : '#222',
-              color: msg.role === 'user' ? '#000' : '#e0e0e0',
-              fontSize: '13px', lineHeight: '1.55', whiteSpace: 'pre-wrap',
+              maxWidth: '80%', padding: '10px 14px',
+              borderRadius: msg.role === 'user' ? '18px 18px 4px 18px' : '18px 18px 18px 4px',
+              background: msg.role === 'user' ? ACCENT : '#1a1a1a',
+              color: msg.role === 'user' ? '#000' : '#ddd',
+              fontSize: '13px', lineHeight: '1.6', whiteSpace: 'pre-wrap',
             }} dir="auto">
               {msg.content}
             </div>
           ))}
           {loading && (
             <div style={{
-              alignSelf: 'flex-start', padding: '10px 14px',
-              borderRadius: '16px 16px 16px 4px', background: '#222',
-              fontSize: '13px', color: '#666',
+              alignSelf: 'flex-start', padding: '10px 16px', borderRadius: '18px 18px 18px 4px',
+              background: '#1a1a1a', display: 'flex', gap: '4px', alignItems: 'center',
             }}>
-              Typing…
+              {[0,1,2].map(i => (
+                <span key={i} style={{
+                  width: '6px', height: '6px', borderRadius: '50%', background: '#444', display: 'inline-block',
+                  animation: `bounce 1s ease ${i * 0.15}s infinite`,
+                }} />
+              ))}
             </div>
           )}
           <div ref={messagesEndRef} />
         </div>
 
-        {/* Input */}
-        <div style={{ padding: '8px 12px 12px', borderTop: '1px solid #222' }}>
-          {/* Voice controls row */}
+        {/* Input area */}
+        <div style={{ padding: '10px 12px 14px', borderTop: '1px solid #1a1a1a' }}>
+          {/* Voice row */}
           <div style={{ display: 'flex', gap: '6px', marginBottom: '8px', alignItems: 'center' }}>
-            {/* Mic button */}
-            <button
-              onClick={toggleListening}
-              title={isListening ? 'Stop listening' : 'Speak a message'}
-              style={{
-                padding: '5px 10px', borderRadius: '8px', border: 'none', cursor: 'pointer',
-                background: isListening ? '#e94560' : '#2a2a2a',
-                fontSize: '14px', transition: 'background 0.2s',
-                animation: isListening ? 'pulse 1s infinite' : 'none',
-              }}
-            >
-              {isListening ? '⏹ Listening…' : '🎤 Speak'}
+            <button onClick={toggleListening} style={iconBtn(isListening, '#ef4444')}>
+              {isListening ? '⏹ Stop' : '🎤 Speak'}
             </button>
-            {/* Language toggle */}
-            <button
-              onClick={() => setVoiceLang((l) => l === 'en-US' ? 'ar-SA' : 'en-US')}
-              title="Switch voice language"
-              style={{
-                padding: '5px 10px', borderRadius: '8px', border: '1px solid #333',
-                background: '#1a1a1a', color: '#aaa', cursor: 'pointer',
-                fontSize: '12px', fontWeight: '600',
-              }}
-            >
+            <button onClick={() => setVoiceLang(l => l === 'en-US' ? 'ar-SA' : 'en-US')} style={iconBtn(false)}>
               {voiceLang === 'en-US' ? '🇺🇸 EN' : '🇸🇦 AR'}
             </button>
-            <span style={{ fontSize: '11px', color: '#444', marginLeft: '2px' }}>
-              {voiceLang === 'en-US' ? 'Voice: English' : 'الصوت: عربي'}
-            </span>
           </div>
-          {/* Text input row */}
-          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-          <input
-            ref={inputRef}
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="Ask for a recommendation… / اسأل عن توصية"
-            disabled={loading}
-            dir="auto"
-            style={{
-              flex: 1, padding: '10px 14px', borderRadius: '10px',
-              border: '1px solid #2a2a2a', background: '#0f0f0f',
-              color: 'white', fontSize: '13px', outline: 'none',
-            }}
-          />
-          <button onClick={sendMessage} disabled={loading || !input.trim()} style={{
-            padding: '10px 16px', borderRadius: '10px', border: 'none',
-            background: '#e8a045', color: '#000', fontWeight: '700', fontSize: '13px',
-            cursor: loading || !input.trim() ? 'not-allowed' : 'pointer',
-            opacity: loading || !input.trim() ? 0.5 : 1,
-            transition: 'opacity 0.15s', whiteSpace: 'nowrap',
-          }}>
-            Send
-          </button>
+          {/* Text row */}
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <input
+              ref={inputRef} value={input} dir="auto"
+              onChange={e => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="Ask about the menu…"
+              disabled={loading}
+              style={{
+                flex: 1, padding: '10px 14px', borderRadius: '12px',
+                border: '1px solid #222', background: '#0a0a0a',
+                color: '#f0f0f0', fontSize: '13px', outline: 'none',
+                transition: 'border-color 0.2s',
+              }}
+              onFocus={e  => { e.target.style.borderColor = ACCENT; }}
+              onBlur={e   => { e.target.style.borderColor = '#222'; }}
+            />
+            <button onClick={sendMessage} disabled={loading || !input.trim()} style={{
+              padding: '10px 16px', borderRadius: '12px', border: 'none',
+              background: ACCENT, color: '#000', fontWeight: '700', fontSize: '13px',
+              cursor: loading || !input.trim() ? 'not-allowed' : 'pointer',
+              opacity: loading || !input.trim() ? 0.4 : 1,
+              transition: 'opacity 0.15s',
+            }}>
+              Send
+            </button>
+          </div>
         </div>
-      </div>
 
       </div>
+
+      {/* Bounce animation for typing dots */}
+      <style>{`
+        @keyframes bounce {
+          0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+          30% { transform: translateY(-5px); opacity: 1; }
+        }
+        ::-webkit-scrollbar { width: 0; }
+      `}</style>
 
     </div>
   );
